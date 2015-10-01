@@ -16,8 +16,19 @@ object Untyped extends StandardTokenParsers {
           | t t
           | '(' t ')'
    */
-  def term: Parser[Term] =
-    ???
+  def term: Parser[Term] = (
+    rep1(ll1Parsable) ^^ {
+      case t::Nil => t
+      case elems => elems reduceLeft App
+    }
+
+  )
+
+  def ll1Parsable: Parser[Term] = (
+    ident ^^ {name => Var(name)}
+    | ("\\" ~> ident) ~ ("." ~> term) ^^ { case name ~ term => Abs(name, term)}
+    | "(" ~> term <~ ")"
+  )
 
   /** <p>
    *    Alpha conversion: term <code>t</code> should be a lambda abstraction
@@ -31,8 +42,10 @@ object Untyped extends StandardTokenParsers {
    *  @param t the given lambda abstraction.
    *  @return  the transformed term with bound variables renamed.
    */
-  def alpha(t: Term): Term =
-    ???
+  def alpha(t: Term): Term = t match {
+    case Abs(name, t1) => 
+    case t1 => t1
+  }
 
   /** Straight forward substitution method
    *  (see definition 5.3.5 in TAPL book).
@@ -46,6 +59,12 @@ object Untyped extends StandardTokenParsers {
   def subst(t: Term, x: String, s: Term): Term =
     ???
 
+  def FV(x: Term): Set[String] = x match {
+    case Var(str) => Set(str)
+    case Abs(str, t1) => FV(t1) - x
+    case App(t1, t2) => FV(t1) ++ FV(t2)
+  }
+
   /** Term 't' does not match any reduction rule. */
   case class NoReductionPossible(t: Term) extends Exception(t.toString)
 
@@ -54,8 +73,7 @@ object Untyped extends StandardTokenParsers {
    *  @param t the initial term
    *  @return  the reduced term
    */
-  def reduceNormalOrder(t: Term): Term =
-    ???
+  def reduceNormalOrder(t: Term): Term = ???
 
   /** Call by value reducer. */
   def reduceCallByValue(t: Term): Term =
