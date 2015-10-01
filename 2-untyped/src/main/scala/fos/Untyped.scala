@@ -39,19 +39,18 @@ object Untyped extends StandardTokenParsers {
    *  @param t the given lambda abstraction.
    *  @return  the transformed term with bound variables renamed.
    */
-  def alpha(t: Term): Term =
-    t match {
-      case Abs(x, t) =>
-        val y = freshName(x)
-        Abs(y, subst(t, x, Var(y)))
-      case _ => t
-    }
+  def alpha(t: Abs): Abs = {
+    val Abs(x, t1) = t
+    val y = freshName(x)
+    Abs(y, subst(t1, x, Var(y)))
+  }
 
   private var count = 0
 
   def freshName(prefix: String): String = {
+    val fresh = s"$prefix$count"
     count += 1
-    s"$prefix$count"
+    fresh
   }
 
   /** Straight forward substitution method
@@ -67,8 +66,8 @@ object Untyped extends StandardTokenParsers {
     t match {
       case Var(`x`) => s
 
-      case Abs(y, t1) if y != x  =>
-        if (FV(s) contains y) subst(alpha(t), x, s)
+      case a @ Abs(y, t1) if y != x =>
+        if (FV(s) contains y) subst(alpha(a), x, s)
         else Abs(y, subst(t1, x, s))
 
       case App(t1, t2) =>
@@ -102,7 +101,7 @@ object Untyped extends StandardTokenParsers {
     t match {
       case App(ReduceNTo(t1), t2) => App(t1, t2)
       case App(t1, ReduceNTo(t2)) => App(t1, t2)
-      case Abs(v, ReduceNTo(t1))  => Abs(v, t1)
+      case Abs(x, ReduceNTo(t1))  => Abs(x, t1)
       case App(Abs(x, t1), t2)    => subst(t1, x, t2)
       case _                      => throw new NoReductionPossible(t)
     }
