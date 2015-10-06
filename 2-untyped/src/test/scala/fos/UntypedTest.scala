@@ -48,10 +48,6 @@ abstract class UntypedTest extends FlatSpec with Matchers {
 
   // Reduces to itself => infinite loop
   // eval("(\\x. x x) (\\x. x x)", "(\\x. x x) (\\x. x x)")
-
-  // Recursion only works under "call by name" evaluation strategy
-  // eval(s"$factorial $zro", s"$one")
-  // eval(s"$factorial $one", s"$one")
 }
 
 class NormalOrder extends UntypedTest {
@@ -79,6 +75,9 @@ class NormalOrder extends UntypedTest {
   eval(s"$times ${nbr(3)} ${nbr(4)}", nbr(12))
   eval(s"$prd $thr", two)
   eval(s"$prd $zro", zro)
+  eval(s"$factorial $zro", s"$one")
+  eval(s"$factorial $one", s"$one")
+  eval(s"$factorial $thr", s"${nbr(6)}")
 }
 
 class CallByValue extends UntypedTest {
