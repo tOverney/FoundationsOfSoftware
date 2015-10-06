@@ -49,7 +49,7 @@ abstract class UntypedTest extends FlatSpec with Matchers {
   // Reduces to itself => infinite loop
   // eval("(\\x. x x) (\\x. x x)", "(\\x. x x) (\\x. x x)")
 
-  // Recursion doesn't seem to work
+  // Recursion only works under "call by name" evaluation strategy
   // eval(s"$factorial $zro", s"$one")
   // eval(s"$factorial $one", s"$one")
 }
@@ -68,6 +68,7 @@ class NormalOrder extends UntypedTest {
   eval(s"(\\x. x) ((\\x. x) (\\z. (\\x. x) z))", "\\z. z")
 
   // For some reason, tests with "succ" fail with call by value
+  // Under "call by value" reduces to behavioral equivalen terms 
   eval(s"$scc $zro", one)
   eval(s"$scc $one", two)
   eval(s"$scc $two", thr)

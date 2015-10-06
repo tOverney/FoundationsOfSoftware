@@ -99,10 +99,10 @@ object Untyped extends StandardTokenParsers {
    */
   def reduceNormalOrder(t: Term): Term =
     t match {
+      case App(Abs(x, t1), t2)    => subst(t1, x, t2)
       case App(ReduceNTo(t1), t2) => App(t1, t2)
       case App(t1, ReduceNTo(t2)) => App(t1, t2)
       case Abs(x, ReduceNTo(t1))  => Abs(x, t1)
-      case App(Abs(x, t1), t2)    => subst(t1, x, t2)
       case _                      => throw new NoReductionPossible(t)
     }
 
