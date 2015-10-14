@@ -13,10 +13,54 @@ object SimplyTyped extends StandardTokenParsers {
                               "pred", "iszero", "let", "in", "fst", "snd")
 
   /** Term     ::= SimpleTerm { SimpleTerm }
-   */
-  def Term: Parser[Term] =
-    ???
+    */
+  def Term: Parser[Term] = rep1(simpleTerm) match {
+    case List(t) => t
+    case ts => ts reduceLeft App
+  }
 
+  def deSugar(x : Int) : Term = x match {
+    case 0 => Zero
+    case v => Succ(deSugar(x - 1))
+  }
+
+  def simpleTerm : Parser[Term] = {
+    values |
+    ifTerm |
+    isZero
+  }
+
+  def tp : Parser[Type] = {
+    rep1sep(simpleType, "->") ^^ {
+      case List(t) => t
+      case ts => ts reduceRight TypeFun
+    }
+  }
+
+  def simpleType : Parser[Type] = {
+    "Nat" ^^^ TypeNat |
+    "Bool" ^^^ TypeBool
+  }
+
+  def booleanTerm : Parser[Term] = "true" ^^^ True | "false" ^^^ False
+  def numericValue : Parser[Term] = {
+    numericLit ^^ (x => deSugar(x.toInt))
+    | "pred" ~> Term ^^ (x => Pred(x))
+    | "succ" ~> Term ^^ (x => Succ(x))
+  }
+  def variable : Parser[Term] = ident ^^ (x => Var(x.toString))
+
+  def values : Parser[Term] = booleanTerm | numericValue | variable | abstraction
+
+  def abstraction : Parser[Term] = "\\" ~> variable ~ ":" ~ typ ~ "." Term ^^ {
+    case variable ~ ":" ~ typ ~ "." body => Abs(variable, typ, body)
+  }
+
+  def ifTerm : Parser[Term] = "if" ~> Term ~ "then" ~ Term ~ "else" Term ^^ {
+    case cond ~ "then" ~ thn ~ "else" ~ els => If(cond, thn, els)
+      }
+
+  def isZero : Parser[Term] = "iszero" ~> Term ^^ (x => IsZero(x))
 
 
   /** Thrown when no reduction rule applies to the given term. */
