@@ -15,8 +15,39 @@ object SimplyTyped extends StandardTokenParsers {
   /** Term     ::= SimpleTerm { SimpleTerm }
    */
   def Term: Parser[Term] =
-    ???
+    rep1(SimpleTerm) ^^ {
+      case List(t) => t
+      case ts      => ts reduceLeft App
+    }
 
+  def SimpleTerm: Parser[Term] = (
+      "true" ^^^ True()
+    | "false" ^^^ False()
+    | "if" ~> Term ~ ("then" ~> Term <~ "else") ~ Term ^^ { case cond ~ t1 ~ t2 => If(cond, t1, t2) }
+    | numericLit ^^ (x => desugarNumLit(x.toInt))
+    | "pred" ~> Term ^^ Pred
+    | "succ" ~> Term ^^ Succ
+    | "iszero" ~> Term ^^ IsZero
+    | ident ^^ Var
+    | "\\" ~> ident ~ (":" ~> Type <~ ".") ~ Term ^^ { case v ~  tp ~ t => Abs(v, tp, t) }
+    | "(" ~> Term <~ ")"
+  )
+
+  def Type: Parser[Type] =
+    rep1sep(SimpleType, "->") ^^ {
+      case List(t) => t
+      case ts => ts reduceRight TypeFun
+    }
+
+  def SimpleType: Parser[Type] = (
+      "Bool" ^^^ TypeBool
+    | "Nat" ^^^ TypeNat
+    | "(" ~> Type <~ ")"
+  )
+
+  def desugarNumLit(x: Int): Term =
+    if (x == 0) Zero()
+    else Succ(desugarNumLit(x - 1))
 
 
   /** Thrown when no reduction rule applies to the given term. */
@@ -31,10 +62,113 @@ object SimplyTyped extends StandardTokenParsers {
   /** The context is a list of variable names paired with their type. */
   type Context = List[(String, Type)]
 
-  /** Call by value reducer. */
-  def reduce(t: Term): Term =
-    ???
+  object ReduceTo {
+    def unapply(t: Term): Option[Term] =
+      try Some(reduce(t))
+      catch { case _: NoRuleApplies => None }
+  }
 
+  /** <p>
+    *    Alpha conversion: term <code>t</code> should be a lambda abstraction
+    *    <code>\x. t</code>.
+    *  </p>
+    *  <p>
+    *    All free occurences of <code>x</code> inside term <code>t/code>
+    *    will be renamed to a unique name.
+    *  </p>
+    *
+    *  @param t the given lambda abstraction.
+    *  @return  the transformed term with bound variables renamed.
+    */
+  def alpha(t: Abs): Abs = {
+    val Abs(x, tp, t1) = t
+    val y = freshName(x)
+    Abs(y, tp, subst(t1, x, Var(y)))
+  }
+
+  private var count = 0
+
+  def freshName(prefix: String): String = {
+    val fresh = s"$prefix$count"
+    count += 1
+    fresh
+  }
+
+  /** Straight forward substitution method
+    *  (see definition 5.3.5 in TAPL book).
+    *  [x -> s]t
+    *
+    *  @param t the term in which we perform substitution
+    *  @param x the variable name
+    *  @param s the term we replace x with
+    *  @return  ...
+    */
+  def subst(t: Term, x: String, s: Term): Term = t match {
+    case Succ(t)                   => Succ(subst(t, x, s))
+    case Pred(t)                   => Pred(subst(t, x, s))
+    case IsZero(t)                 => IsZero(subst(t, x, s))
+    case If(cond, t1, t2)          => If(subst(cond, x, s), subst(t1, x, s), subst(t2, x, s))
+    case Var(`x`)                  => s
+
+    case a @ Abs(y, tp, t1) if y != x =>
+      if (FV(s) contains y) subst(alpha(a), x, s)
+      else Abs(y, tp, subst(t1, x, s))
+
+    case App(t1, t2) =>
+      App(subst(t1, x, s), subst(t2, x, s))
+
+    case _ => t
+  }
+
+  def isV(t: Term) = t match {
+    case True() | False() | _: Abs => true
+    case _                         => isNV(t)
+  }
+
+  def isNV(t: Term): Boolean = t match {
+    case Zero()   => true
+    case Succ(nv) => isNV(nv)
+    case _        => false
+  }
+
+  def FV(t: Term): Set[String] = t match {
+    case Succ(t)          => FV(t)
+    case Pred(t)          => FV(t)
+    case IsZero(t)        => FV(t)
+    case If(cond, t1, t2) => FV(cond) ++ FV(t1) ++ FV(t2)
+    case Var(name)        => Set(name)
+    case Abs(v, _, t)     => FV(t) - v
+    case App(t1, t2)      => FV(t1) ++ FV(t2)
+    case _                => Set.empty
+  }
+
+  /** Call by value reducer. */
+  def reduce(t: Term): Term = t match {
+    // Computation Rules
+    case If(True(), t1, _)              => t1
+    case If(False(), _, t2)             => t2
+    case IsZero(Zero())                 => True()
+    case IsZero(Succ(nv)) if isNV(nv)   => False()
+    case Pred(Zero())                   => Zero()
+    case Pred(Succ(nv)) if isNV(nv)     => nv
+    case App(Abs(x, _, t), v) if isV(v) => subst(t, x, v)
+
+    // Congruence Rules
+    case If(ReduceTo(c), t1, t2)        => If(c, t1, t2)
+    case IsZero(ReduceTo(nv))           => IsZero(nv)
+    case Succ(ReduceTo(nv))             => Succ(nv)
+    case Pred(ReduceTo(nv))             => Pred(nv)
+    case App(ReduceTo(t1), t2)          => App(t1, t2)
+    case App(v, ReduceTo(t)) if isV(v)  => App(v, t)
+
+    case _                              => throw new NoRuleApplies(t)
+  }
+
+  def checkType(ctx: Context, t: Term, expected: Type): Unit = {
+    val tp = typeof(ctx, t)
+    if (tp != expected)
+      throw new TypeError(t, s"type mismatch: expected $expected, found $tp")
+  }
 
   /** Returns the type of the given term <code>t</code>.
    *
@@ -42,8 +176,51 @@ object SimplyTyped extends StandardTokenParsers {
    *  @param t   the given term
    *  @return    the computed type
    */
-  def typeof(ctx: Context, t: Term): Type =
-    ???
+  def typeof(ctx: Context, t: Term): Type = t match {
+    case True() | False() =>
+      TypeBool
+
+    case Zero() =>
+      TypeNat
+
+    case Pred(n) =>
+      checkType(ctx, n, TypeNat)
+      TypeNat
+
+    case Succ(n) =>
+      checkType(ctx, n, TypeNat)
+      TypeNat
+
+    case IsZero(n) =>
+      checkType(ctx, n, TypeNat)
+      TypeBool
+
+    case If(cond, t1, t2) =>
+      checkType(ctx, cond, TypeBool)
+      val tp1 = typeof(ctx, t1)
+      checkType(ctx, t2, tp1)
+      tp1
+
+    case Var(name) =>
+      ctx find (_._1 == name) map (_._2) match {
+        case Some(tp) => tp
+        case _        => throw new TypeError(t, s"undefined variable $name")
+      }
+
+    case Abs(x, tp1, t) =>
+      val tp2 = typeof((x, tp1) :: ctx, t)
+      TypeFun(tp1, tp2)
+
+    case App(t1, t2) =>
+      val tp1 = typeof(ctx, t1)
+      val tp2 = typeof(ctx, t2)
+      tp1 match {
+        case TypeFun(`tp2`, tp) =>
+          tp
+        case _ =>
+          throw new TypeError(t, s"type mismatch: expected $tp2->?, found $tp1")
+      }
+  }
 
 
   /** Returns a stream of terms, each being one step of reduction.
@@ -54,7 +231,7 @@ object SimplyTyped extends StandardTokenParsers {
    */
   def path(t: Term, reduce: Term => Term): Stream[Term] =
     try {
-      var t1 = reduce(t)
+      val t1 = reduce(t)
       Stream.cons(t, path(t1, reduce))
     } catch {
       case NoRuleApplies(_) =>
@@ -71,7 +248,7 @@ object SimplyTyped extends StandardTokenParsers {
           for (t <- path(trees, reduce))
             println(t)
         } catch {
-          case tperror: Exception => println(tperror.toString)
+          case TypeError(t: Term, msg: String) => println(s"$msg\n$t")
         }
       case e =>
         println(e)
