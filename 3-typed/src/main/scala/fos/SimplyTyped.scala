@@ -21,22 +21,46 @@ object SimplyTyped extends StandardTokenParsers {
     }
 
   def SimpleTerm: Parser[Term] = (
-      "true" ^^^ True()
-    | "false" ^^^ False()
-    | "if" ~> Term ~ ("then" ~> Term <~ "else") ~ Term ^^ { case cond ~ t1 ~ t2 => If(cond, t1, t2) }
-    | numericLit ^^ (x => desugarNumLit(x.toInt))
-    | "pred" ~> Term ^^ Pred
-    | "succ" ~> Term ^^ Succ
-    | "iszero" ~> Term ^^ IsZero
-    | ident ^^ Var
-    | "\\" ~> ident ~ (":" ~> Type <~ ".") ~ Term ^^ { case v ~  tp ~ t => Abs(v, tp, t) }
+      truev
+    | falsev
+    | ift
+    | integer
+    | predecessor
+    | successor
+    | iszero
+    | variable
+    | abstraction
+    | let
+    | pair
+    | first
+    | second
     | "(" ~> Term <~ ")"
   )
 
+  def truev       = "true" ^^^ True()
+  def falsev      = "false" ^^^ False()
+  def ift         = "if" ~> Term ~ ("then" ~> Term <~ "else") ~ Term ^^ { case cond ~ t1 ~ t2 => If(cond, t1, t2)}
+  def integer     = numericLit ^^ (x => desugarNumLit(x.toInt))
+  def predecessor = "pred" ~> Term ^^ Pred
+  def successor   = "succ" ~> Term ^^ Succ
+  def iszero      = "iszero" ~> Term ^^ IsZero
+  def variable    = ident ^^ Var
+  def abstraction = "\\" ~> ident ~ (":" ~> Type <~ ".") ~ Term ^^ { case v ~  tp ~ t => Abs(v, tp, t) }
+  def let         =  "let" ~> ident ~ (":" ~> Type <~ "=") ~ Term ~ ("in" ~> Term) ^^ { case v ~ tp ~ t2 ~ t1 => App(Abs(v, tp, t2), t1) }
+  def pair        = "{" ~> Term ~ ("," ~> Term <~ "}") ^^ { case t1 ~ t2 => TermPair(t1, t2) }
+  def first       = "fst" ~> Term ^^ First
+  def second      = "snd" ~> Term ^^ Second
+
   def Type: Parser[Type] =
-    rep1sep(SimpleType, "->") ^^ {
+    rep1sep(Pairtype, "->") ^^ {
       case List(t) => t
-      case ts => ts reduceRight TypeFun
+      case ts      => ts reduceRight TypeFun
+    }
+
+  def Pairtype: Parser[Type] =
+    rep1sep(SimpleType, "*") ^^ {
+      case List(t) => t
+      case ts      => ts reduceRight TypePair
     }
 
   def SimpleType: Parser[Type] = (
@@ -104,11 +128,11 @@ object SimplyTyped extends StandardTokenParsers {
     *  @return  ...
     */
   def subst(t: Term, x: String, s: Term): Term = t match {
-    case Succ(t)                   => Succ(subst(t, x, s))
-    case Pred(t)                   => Pred(subst(t, x, s))
-    case IsZero(t)                 => IsZero(subst(t, x, s))
-    case If(cond, t1, t2)          => If(subst(cond, x, s), subst(t1, x, s), subst(t2, x, s))
-    case Var(`x`)                  => s
+    case Succ(t)          => Succ(subst(t, x, s))
+    case Pred(t)          => Pred(subst(t, x, s))
+    case IsZero(t)        => IsZero(subst(t, x, s))
+    case If(cond, t1, t2) => If(subst(cond, x, s), subst(t1, x, s), subst(t2, x, s))
+    case TermPair(t1, t2) => TermPair(subst(t1, x, s), subst(t2, x, s))
 
     case a @ Abs(y, tp, t1) if y != x =>
       if (FV(s) contains y) subst(alpha(a), x, s)
@@ -117,11 +141,15 @@ object SimplyTyped extends StandardTokenParsers {
     case App(t1, t2) =>
       App(subst(t1, x, s), subst(t2, x, s))
 
-    case _ => t
+    case Var(`x`)  => s
+    case First(t)  => First(subst(t, x, s))
+    case Second(t) => Second(subst(t, x, s))
+    case _         => t
   }
 
-  def isV(t: Term) = t match {
+  def isV(t: Term): Boolean = t match {
     case True() | False() | _: Abs => true
+    case TermPair(t1, t2)          => isV(t1) && isV(t2)
     case _                         => isNV(t)
   }
 
@@ -145,13 +173,15 @@ object SimplyTyped extends StandardTokenParsers {
   /** Call by value reducer. */
   def reduce(t: Term): Term = t match {
     // Computation Rules
-    case If(True(), t1, _)              => t1
-    case If(False(), _, t2)             => t2
-    case IsZero(Zero())                 => True()
-    case IsZero(Succ(nv)) if isNV(nv)   => False()
-    case Pred(Zero())                   => Zero()
-    case Pred(Succ(nv)) if isNV(nv)     => nv
-    case App(Abs(x, _, t), v) if isV(v) => subst(t, x, v)
+    case If(True(), t1, _)                              => t1
+    case If(False(), _, t2)                             => t2
+    case IsZero(Zero())                                 => True()
+    case IsZero(Succ(nv))         if isNV(nv)           => False()
+    case Pred(Zero())                                   => Zero()
+    case Pred(Succ(nv))           if isNV(nv)           => nv
+    case App(Abs(x, _, t), v)     if isV(v)             => subst(t, x, v)
+    case First(TermPair(t1, t2))  if isV(t1) && isV(t2) => t1
+    case Second(TermPair(t1, t2)) if isV(t1) && isV(t2) => t2
 
     // Congruence Rules
     case If(ReduceTo(c), t1, t2)        => If(c, t1, t2)
@@ -160,6 +190,10 @@ object SimplyTyped extends StandardTokenParsers {
     case Pred(ReduceTo(nv))             => Pred(nv)
     case App(ReduceTo(t1), t2)          => App(t1, t2)
     case App(v, ReduceTo(t)) if isV(v)  => App(v, t)
+    case First(ReduceTo(t))             => First(t)
+    case Second(ReduceTo(t))            => First(t)
+    case TermPair(ReduceTo(t1), t2)     => TermPair(t1, t2)
+    case TermPair(t1, ReduceTo(t2))     => TermPair(t1, t2)
 
     case _                              => throw new NoRuleApplies(t)
   }
@@ -218,7 +252,28 @@ object SimplyTyped extends StandardTokenParsers {
         case TypeFun(`tp2`, tp) =>
           tp
         case _ =>
-          throw new TypeError(t, s"type mismatch: expected $tp2->?, found $tp1")
+          throw new TypeError(t, s"parameter type mismatch: expected $tp2, found $tp1")
+      }
+
+    case TermPair(t1, t2) =>
+      val tp1 = typeof(ctx, t1)
+      val tp2 = typeof(ctx, t2)
+      TypePair(tp1, tp2)
+
+    case First(t) =>
+      typeof(ctx, t) match {
+        case TypePair(tp, _) =>
+          tp
+        case tp =>
+          throw new TypeError(t, s"pair type expected but $tp found")
+      }
+
+    case Second(t) =>
+      typeof(ctx, t) match {
+        case TypePair(_, tp) =>
+          tp
+        case tp =>
+          throw new TypeError(t, s"pair type expected but $tp found")
       }
   }
 
