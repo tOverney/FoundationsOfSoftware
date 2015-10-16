@@ -48,7 +48,7 @@ object SimplyTyped extends StandardTokenParsers {
     "Bool" ^^^ TypeBool
   }
 
-  def booleanTerm : Parser[Term] = "true" ^^^ True() | "false" ^^^ False()
+  def booleanValue : Parser[Term] = "true" ^^^ True() | "false" ^^^ False()
   def numericValue : Parser[Term] = {
     numericLit ^^ (x => deSugar(x.toInt)) |
     "pred" ~> Term ^^ (x => Pred(x)) |
@@ -57,12 +57,13 @@ object SimplyTyped extends StandardTokenParsers {
   def variable : Parser[Term] = ident ^^ Var
 
   def values : Parser[Term] = (
-    booleanTerm
+    booleanValue
       | numericValue
       | variable
       | abstraction
       | pair
-      | extract)
+      | extract
+  )
 
   def abstraction : Parser[Term] = "\\" ~> variable ~ ":" ~ tp ~ "." ~ Term ^^ {
     case variable ~ ":" ~ typ ~ "." ~ body => Abs(variable.toString, typ, body)
@@ -120,15 +121,21 @@ object SimplyTyped extends StandardTokenParsers {
 
   def isValue(t : Term) : Boolean = t match  {
     case True() | False() | Abs(_, _, _) | Succ(_) | Zero() => true
+    case TermPair(t1, t2) => isValue(t1) && isValue(t2)
     case _ => false
   }
 
   def subst(t : Term, x : String, s : Term) : Term = t match {
+    case Succ(t) => Succ(subst(t, x, s))
+    case Pred(t) => Pred(subst(t, x, s))
+    case IsZero(t) => IsZero(subst(t, x, s))
+    case a @ Abs(y, tp, t1) if x != y => {
+      if (fvOf(s) contains y) subst(alpha(a), x, s)
+      else Abs(y, tp, subst(t1, x, s))
+    }
     case App(t1, t2) => App(subst(t1, x, s), subst(t2, x, s))
-    case Abs(x, tp, t1) if ! fvOf(s).contains(x) => subst(t1, x, s)
-    case Abs(x, tp, t1) => subst(t1, x, alpha(s))
     case If(cnd, thn, els) => If(subst(cnd, x, s), subst(thn, x, s), subst(els, x, s))
-      case Var(y) if x == y => s
+    case Var(y) if x == y => s
     case TermPair(fst, snd) => TermPair(subst(fst, x, s), subst(snd, x, s))
     case First(pair) => First(subst(pair, x, s))
     case Second(pair) => Second(subst(pair, x, s))
@@ -138,7 +145,7 @@ object SimplyTyped extends StandardTokenParsers {
   def alpha(t : Term) : Term = t match {
     case Abs(x, tp, t) => {
       val name = freshName(x)
-      Abs(x, tp, subst(t, x, Var(name)))
+      Abs(name, tp, subst(t, x, Var(name)))
     }
     case _ => t
   }
@@ -166,7 +173,7 @@ object SimplyTyped extends StandardTokenParsers {
     case IsZero(Succ(v)) if isNv(v) => False()
     case Pred(Zero()) => Zero()
     case Pred(Succ(v)) if isNv(v) => v
-    case App(Abs(x, typ, t1), v2) => subst(t1, x, v2)
+    case App(Abs(x, typ, t1), v2) if isValue(v2) => subst(t1, x, v2)
     case First(TermPair(v1, _)) => v1
     case Second(TermPair(_, v2)) => v2
 
@@ -218,11 +225,11 @@ object SimplyTyped extends StandardTokenParsers {
     case TermPair(fst, snd) => TypePair(typeof(ctx, fst), typeof(ctx, snd))
     case First(pair) => typeof(ctx, pair) match {
       case TypePair(t1, _) => t1
-      case _ => throw new TypeError(t, pair + " is not a pair")
+      case tp @ _ => throw new TypeError(t, "Expected Pair got " + tp)
     }
     case Second(pair) => typeof(ctx, pair) match {
       case TypePair(_, t2) => t2
-      case _ => throw new TypeError(t, pair + " is not a pair")
+      case tp @  _ => throw new TypeError(t, "Expected Pair got " + tp)
     }
 
     case _ => throw new TypeError(t, "Unknown type error")
