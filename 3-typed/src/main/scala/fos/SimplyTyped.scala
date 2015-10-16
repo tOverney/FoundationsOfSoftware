@@ -46,7 +46,7 @@ object SimplyTyped extends StandardTokenParsers {
   def iszero      = "iszero" ~> Term ^^ IsZero
   def variable    = ident ^^ Var
   def abstraction = "\\" ~> ident ~ (":" ~> Type <~ ".") ~ Term ^^ { case v ~  tp ~ t => Abs(v, tp, t) }
-  def let         =  "let" ~> ident ~ (":" ~> Type <~ "=") ~ Term ~ ("in" ~> Term) ^^ { case v ~ tp ~ t2 ~ t1 => App(Abs(v, tp, t2), t1) }
+  def let         =  "let" ~> ident ~ (":" ~> Type <~ "=") ~ Term ~ ("in" ~> Term) ^^ { case v ~ tp ~ t1 ~ t2 => App(Abs(v, tp, t2), t1) }
   def pair        = "{" ~> Term ~ ("," ~> Term <~ "}") ^^ { case t1 ~ t2 => TermPair(t1, t2) }
   def first       = "fst" ~> Term ^^ First
   def second      = "snd" ~> Term ^^ Second
@@ -317,7 +317,6 @@ object SimplyTyped extends StandardTokenParsers {
     val tokens = new lexical.Scanner(stdin.readLine())
     phrase(Term)(tokens) match {
       case Success(trees, _) =>
-        println(trees)
         try {
           println("typed: " + typeof(Nil, trees))
           for (t <- path(trees, reduce))
