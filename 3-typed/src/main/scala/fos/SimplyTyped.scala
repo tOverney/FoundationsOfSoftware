@@ -52,12 +52,12 @@ object SimplyTyped extends StandardTokenParsers {
   def second      = "snd" ~> Term ^^ Second
 
   def Type: Parser[Type] =
-    rep1sep(Pairtype, "->") ^^ {
+    rep1sep(PairType, "->") ^^ {
       case List(t) => t
       case ts      => ts reduceRight TypeFun
     }
 
-  def Pairtype: Parser[Type] =
+  def PairType: Parser[Type] =
     rep1sep(SimpleType, "*") ^^ {
       case List(t) => t
       case ts      => ts reduceRight TypePair
@@ -86,7 +86,7 @@ object SimplyTyped extends StandardTokenParsers {
   /** The context is a list of variable names paired with their type. */
   type Context = List[(String, Type)]
 
-  object ReduceTo {
+  object Reduced {
     def unapply(t: Term): Option[Term] =
       try Some(reduce(t))
       catch { case _: NoRuleApplies => None }
@@ -132,19 +132,17 @@ object SimplyTyped extends StandardTokenParsers {
     case Pred(t)          => Pred(subst(t, x, s))
     case IsZero(t)        => IsZero(subst(t, x, s))
     case If(cond, t1, t2) => If(subst(cond, x, s), subst(t1, x, s), subst(t2, x, s))
-    case TermPair(t1, t2) => TermPair(subst(t1, x, s), subst(t2, x, s))
+    case Var(`x`)         => s
 
     case a @ Abs(y, tp, t1) if y != x =>
       if (FV(s) contains y) subst(alpha(a), x, s)
       else Abs(y, tp, subst(t1, x, s))
 
-    case App(t1, t2) =>
-      App(subst(t1, x, s), subst(t2, x, s))
-
-    case Var(`x`)  => s
-    case First(t)  => First(subst(t, x, s))
-    case Second(t) => Second(subst(t, x, s))
-    case _         => t
+    case App(t1, t2)      => App(subst(t1, x, s), subst(t2, x, s))
+    case TermPair(t1, t2) => TermPair(subst(t1, x, s), subst(t2, x, s))
+    case First(t)         => First(subst(t, x, s))
+    case Second(t)        => Second(subst(t, x, s))
+    case _                => t
   }
 
   def isV(t: Term): Boolean = t match {
@@ -167,6 +165,9 @@ object SimplyTyped extends StandardTokenParsers {
     case Var(name)        => Set(name)
     case Abs(v, _, t)     => FV(t) - v
     case App(t1, t2)      => FV(t1) ++ FV(t2)
+    case TermPair(t1, t2) => FV(t1) ++ FV(t2)
+    case First(t)         => FV(t)
+    case Second(t)        => FV(t)
     case _                => Set.empty
   }
 
@@ -184,25 +185,25 @@ object SimplyTyped extends StandardTokenParsers {
     case Second(TermPair(t1, t2)) if isV(t1) && isV(t2) => t2
 
     // Congruence Rules
-    case If(ReduceTo(c), t1, t2)        => If(c, t1, t2)
-    case IsZero(ReduceTo(nv))           => IsZero(nv)
-    case Succ(ReduceTo(nv))             => Succ(nv)
-    case Pred(ReduceTo(nv))             => Pred(nv)
-    case App(ReduceTo(t1), t2)          => App(t1, t2)
-    case App(v, ReduceTo(t)) if isV(v)  => App(v, t)
-    case First(ReduceTo(t))             => First(t)
-    case Second(ReduceTo(t))            => First(t)
-    case TermPair(ReduceTo(t1), t2)     => TermPair(t1, t2)
-    case TermPair(t1, ReduceTo(t2))     => TermPair(t1, t2)
+    case If(Reduced(c), t1, t2)               => If(c, t1, t2)
+    case IsZero(Reduced(nv))                  => IsZero(nv)
+    case Succ(Reduced(nv))                    => Succ(nv)
+    case Pred(Reduced(nv))                    => Pred(nv)
+    case App(Reduced(t1), t2)                 => App(t1, t2)
+    case App(v, Reduced(t))        if isV(v)  => App(v, t)
+    case First(Reduced(t))                    => First(t)
+    case Second(Reduced(t))                   => First(t)
+    case TermPair(Reduced(t1), t2)            => TermPair(t1, t2)
+    case TermPair(t1, Reduced(t2)) if isV(t1) => TermPair(t1, t2)
 
-    case _                              => throw new NoRuleApplies(t)
+    case _ => throw new NoRuleApplies(t)
   }
 
-  def checkType(ctx: Context, t: Term, expected: Type): Unit = {
-    val tp = typeof(ctx, t)
-    if (tp != expected)
-      throw new TypeError(t, s"type mismatch: expected $expected, found $tp")
-  }
+//  def checkType(ctx: Context, t: Term, expected: Type): Unit = {
+//    val tp = typeof(ctx, t)
+//    if (tp != expected)
+//      throw new TypeError(t, s"type mismatch: expected $expected, found $tp")
+//  }
 
   /** Returns the type of the given term <code>t</code>.
    *
@@ -218,22 +219,40 @@ object SimplyTyped extends StandardTokenParsers {
       TypeNat
 
     case Pred(n) =>
-      checkType(ctx, n, TypeNat)
-      TypeNat
+      typeof(ctx, n) match {
+        case TypeNat =>
+          TypeNat
+        case tp =>
+          throw new TypeError(t, s"type mismatch: expected $TypeNat, found $tp")
+      }
 
     case Succ(n) =>
-      checkType(ctx, n, TypeNat)
-      TypeNat
+      typeof(ctx, n) match {
+        case TypeNat =>
+          TypeNat
+        case tp =>
+          throw new TypeError(t, s"type mismatch: expected $TypeNat, found $tp")
+      }
 
     case IsZero(n) =>
-      checkType(ctx, n, TypeNat)
-      TypeBool
+      typeof(ctx, n) match {
+        case TypeNat =>
+          TypeBool
+        case tp =>
+          throw new TypeError(t, s"type mismatch: expected $TypeNat, found $tp")
+      }
 
     case If(cond, t1, t2) =>
-      checkType(ctx, cond, TypeBool)
-      val tp1 = typeof(ctx, t1)
-      checkType(ctx, t2, tp1)
-      tp1
+      typeof(ctx, cond) match {
+        case TypeBool =>
+          val tp1 = typeof(ctx, t1)
+          val tp2 = typeof(ctx, t2)
+          if (tp1 == tp2) tp1
+          else throw new TypeError(t, s"type mismatch: expected $tp1, found $tp2")
+
+        case tp =>
+          throw new TypeError(t, s"type mismatch: expected $TypeBool, found $tp")
+      }
 
     case Var(name) =>
       ctx find (_._1 == name) map (_._2) match {
@@ -260,16 +279,16 @@ object SimplyTyped extends StandardTokenParsers {
       val tp2 = typeof(ctx, t2)
       TypePair(tp1, tp2)
 
-    case First(t) =>
-      typeof(ctx, t) match {
+    case First(p) =>
+      typeof(ctx, p) match {
         case TypePair(tp, _) =>
           tp
         case tp =>
           throw new TypeError(t, s"pair type expected but $tp found")
       }
 
-    case Second(t) =>
-      typeof(ctx, t) match {
+    case Second(p) =>
+      typeof(ctx, p) match {
         case TypePair(_, tp) =>
           tp
         case tp =>
@@ -298,6 +317,7 @@ object SimplyTyped extends StandardTokenParsers {
     val tokens = new lexical.Scanner(stdin.readLine())
     phrase(Term)(tokens) match {
       case Success(trees, _) =>
+        println(trees)
         try {
           println("typed: " + typeof(Nil, trees))
           for (t <- path(trees, reduce))
