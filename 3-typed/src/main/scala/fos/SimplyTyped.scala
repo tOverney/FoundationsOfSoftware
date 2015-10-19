@@ -199,12 +199,6 @@ object SimplyTyped extends StandardTokenParsers {
     case _ => throw new NoRuleApplies(t)
   }
 
-//  def checkType(ctx: Context, t: Term, expected: Type): Unit = {
-//    val tp = typeof(ctx, t)
-//    if (tp != expected)
-//      throw new TypeError(t, s"type mismatch: expected $expected, found $tp")
-//  }
-
   /** Returns the type of the given term <code>t</code>.
    *
    *  @param ctx the initial context
@@ -255,9 +249,8 @@ object SimplyTyped extends StandardTokenParsers {
       }
 
     case Var(name) =>
-      ctx find (_._1 == name) map (_._2) match {
-        case Some(tp) => tp
-        case _        => throw new TypeError(t, s"undefined variable $name")
+      ctx find (_._1 == name) map (_._2) getOrElse {
+        throw new TypeError(t, s"undefined variable $name")
       }
 
     case Abs(x, tp1, t) =>
@@ -318,7 +311,7 @@ object SimplyTyped extends StandardTokenParsers {
     phrase(Term)(tokens) match {
       case Success(trees, _) =>
         try {
-          println("typed: " + typeof(Nil, trees))
+          println(s"typed: ${typeof(Nil, trees)}")
           for (t <- path(trees, reduce))
             println(t)
         } catch {
