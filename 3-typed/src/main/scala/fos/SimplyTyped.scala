@@ -35,7 +35,15 @@ object SimplyTyped extends StandardTokenParsers {
     | ident ^^ {name => Var(name)}
     | ("\\" ~> ident) ~ (":" ~> parseType) ~ ("." ~> Term) ^^ { 
       case name ~ tpe ~ t => Abs(name, tpe, t)}
+    | ("let" ~> ident <~ ":") ~ parseType ~ ("=" ~> Term <~ "in") ~ Term ^^ {
+      case name ~ tpe ~ t1 ~ t2 => App(Abs(name, tpe, t2), t1)
+    }
     | "(" ~> Term <~ ")"
+    | ("{" ~> Term <~ ",") ~ (Term <~ "}") ^^ {
+      case fst ~ snd => TermPair(fst, snd)
+    }
+    | "fst" ~> Term ^^ First
+    | "snd" ~> Term ^^ Second
   )
 
   def numToSucc(nv: Int): Term = nv match {
@@ -44,11 +52,16 @@ object SimplyTyped extends StandardTokenParsers {
   }
 
   def parseType: Parser[Type] = (
-    rep1sep(parseSimpleType, "->") ^^ {
-      case x::Nil => x
-      case elems => elems reduceRight TypeFun
-    }
+    genRepSep(genRepSep(parseSimpleType, "*", TypePair), "->", TypeFun)
   )
+
+  def genRepSep(simplerParser: Parser[Type], sep: String,
+    outType: (Type, Type) => Type): Parser[Type] = {
+    rep1sep(simplerParser, sep) ^^ {
+      case x::Nil => x
+      case elems => elems reduceRight outType
+    }
+  }
 
 
   def parseSimpleType: Parser[Type] = (
@@ -76,9 +89,9 @@ object SimplyTyped extends StandardTokenParsers {
     case If(True(), t1, _) => t1
     case If(False(), _, t2) => t2
     case IsZero(Zero()) => True()
-    case IsZero(Succ(t)) if isNumVal(t) => False()
+    case IsZero(Succ(t1)) if isNumVal(t1) => False()
     case Pred(Zero()) => Zero()
-    case Pred(Succ(t)) if isNumVal(t) => t
+    case Pred(Succ(t1)) if isNumVal(t1) => t1
     case App(Abs(x, _, t1), v2) if isVal(v2) => subst(t1, x, v2)
 
     // Congruence
@@ -88,6 +101,14 @@ object SimplyTyped extends StandardTokenParsers {
     case Pred(Reduceable(tp)) => Pred(tp)
     case App(Reduceable(t1p), t2) => App(t1p, t2)
     case App(v1, Reduceable(t2p)) if isVal(v1) => App(v1, t2p)
+
+    // Pair rules
+    case First(p @ TermPair(v1, _)) if isVal(p) => v1
+    case Second(p @ TermPair(_, v2)) if isVal(p) => v2
+    case First(Reduceable(tp)) => First(tp)
+    case Second(Reduceable(tp)) => Second(tp)
+    case TermPair(Reduceable(t1p), t2) => TermPair(t1p, t2)
+    case TermPair(v1, Reduceable(t2p)) if isVal(v1) => TermPair(v1, t2p)
     case t => throw new NoRuleApplies(t)
   }
 
@@ -101,13 +122,13 @@ object SimplyTyped extends StandardTokenParsers {
 
   def isVal(t: Term): Boolean = t match {
     case True() | False() | Abs(_, _, _) => true
-    case x if isNumVal(x) => true
-    case _ => false
+    case TermPair(v1, v2) => isVal(v1) && isVal(v2)
+    case x => isNumVal(x)
   }
 
   def isNumVal(t: Term): Boolean = t match {
     case Zero() => true
-    case Succ(t) => isNumVal(t)
+    case Succ(t1) => isNumVal(t1)
     case _ => false
   }
 
@@ -115,11 +136,14 @@ object SimplyTyped extends StandardTokenParsers {
     case Succ(t1) => Succ(subst(t1, x, s))
     case Pred(t1) => Pred(subst(t1, x, s))
     case IsZero(t1) => IsZero(subst(t1, x, s))
+    case TermPair(t1, t2) => TermPair(subst(t1, x, s), subst(t2, x, s))
+    case First(t1) => First(subst(t1, x, s))
+    case Second(t1) => Second(subst(t1, x, s))
     case If(cond, t1, t2) =>
       If(subst(cond, x, s), subst(t1, x, s), subst(t2, x, s))
     case Var(`x`) => s
-    case a @ Abs(y, tpe, t1) if y != x =>
-      if (FV(s)(y)) subst(alpha(a), x, s)
+    case abs @ Abs(y, tpe, t1) if y != x =>
+      if (FV(s)(y)) subst(alpha(abs), x, s)
       else Abs(y, tpe, subst(t1, x, s))
     case App(t1, t2) =>
       App(subst(t1, x, s), subst(t2, x, s))
@@ -132,8 +156,11 @@ object SimplyTyped extends StandardTokenParsers {
     case Pred(t1) => FV(t1)
     case IsZero(t1) => FV(t1)
     case If(cond, t1, t2) => FV(cond) ++ FV(t1) ++ FV(t2)
-    case Abs(v, _, t)   => FV(t) - v
+    case Abs(v, _, t1)   => FV(t1) - v
     case App(t1, t2) => FV(t1) ++ FV(t2)
+    case TermPair(t1, t2) => FV(t1) ++ FV(t2)
+    case First(t1) => FV(t1)
+    case Second(t1) => FV(t1)
     case _ => Set.empty
   }
 
@@ -154,30 +181,53 @@ object SimplyTyped extends StandardTokenParsers {
     t match {
       case True() | False() => TypeBool
       case Zero() => TypeNat
-      case Succ(TypesTo(TypeNat)) => TypeNat
-      case Pred(TypesTo(TypeNat)) => TypeNat
-      case IsZero(TypesTo(TypeNat)) => TypeBool
-      case If(TypesTo(TypeBool), TypesTo(tp1), TypesTo(tp2)) if tp1 == tp2 =>
-        tp1
+      case Succ(t1) => typeof(ctx, t1) match {
+        case TypeNat => TypeNat
+        case otherType => 
+          throw new TypeError(t, s"TypeNat expected found $otherType")
+      }
+      case Pred(t1) => typeof(ctx, t1) match {
+        case TypeNat => TypeNat
+        case otherType => 
+          throw new TypeError(t, s"TypeNat expected found $otherType")
+      }
+      case IsZero(t1) => typeof(ctx, t1) match {
+        case TypeNat => TypeBool
+        case otherType =>
+          throw new TypeError(t, s"TypeNat expected found $otherType")
+      }
+      case If(cond, t1, t2) => typeof(ctx, cond) match {
+        case TypeBool => 
+          val tp1 = typeof(ctx, t1)
+          val tp2 = typeof(ctx, t2)
+          if (tp1 == tp2) tp1 else throw new TypeError(t, "Type mismatch")
+        case ot => throw new TypeError(t, s"TypeBool expected found $ot")
+      }
       case Var(x) => ctx0.find(_._1 == x) match {
         case Some((name, tpe)) => tpe
-        case _ => throw new TypeError(t, "Not working")
+        case _ => throw new TypeError(t, s"$x is an undefined variable")
       }
-      case Abs(x, tpe1, t2) => TypeFun(tpe1, typeof(ctx0 :+ (x, tpe1), t2))
-      case App(TypesTo(tpe1), TypesTo(tpe2)) => tpe1 match {
-        case TypeFun(`tpe2`, tpe3) => tpe3
-        case _ => throw new TypeError(t, "Not working")
-      } 
-      case _ => throw new TypeError(t, "Not working")
+      case Abs(x, tpe1, t2) => TypeFun(tpe1, typeof(ctx :+ (x, tpe1), t2))
+      case App(t1, t2) => 
+        val tpe1 = typeof(ctx, t1)
+        val tpe2 = typeof(ctx, t2)
+        tpe1 match {
+          case TypeFun(`tpe2`, tpe3) => tpe3
+          case _ => throw new TypeError(t, "Type parameter mismatch")
+        }
+      case TermPair(t1, t2) => 
+        val tpe1 = typeof(ctx, t1)
+        val tpe2 = typeof(ctx, t2)
+        TypePair(tpe1, tpe2)
+      case First(t1) => typeof(ctx, t1) match {
+        case TypePair(tpe1, _) => tpe1
+        case ot => throw new TypeError(t, s"TypePair expected found $ot")
+      }
+      case Second(t1) => typeof(ctx, t1) match {
+        case TypePair(_, tpe2) => tpe2
+        case ot => throw new TypeError(t, s"TypePair expected found $ot")
+      }
     }
-  }
-
-  object TypesTo {
-    def unapply(t: Term)(implicit ctx0: Context): Option[Type] = 
-      try Some(typeof(ctx0, t))
-      catch {
-        case _: Exception => None
-      }
   }
 
 
