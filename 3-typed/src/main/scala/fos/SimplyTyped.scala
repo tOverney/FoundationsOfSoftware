@@ -203,11 +203,8 @@ object SimplyTyped extends StandardTokenParsers {
           if (tp1 == tp2) tp1 else throw new TypeError(t, "Type mismatch")
         case ot => throw new TypeError(t, s"TypeBool expected found $ot")
       }
-      case Var(x) => ctx0.find(_._1 == x) match {
-        case Some((name, tpe)) => tpe
-        case _ => throw new TypeError(t, s"$x is an undefined variable")
-      }
-      case Abs(x, tpe1, t2) => TypeFun(tpe1, typeof(ctx :+ (x, tpe1), t2))
+      case Var(x) => ctx0.find(_._1 == x).getOrElse(throw new TypeError(t, s"$x is an undefined variable"))._2
+      case Abs(x, tpe1, t2) => TypeFun(tpe1, typeof(List((x, tpe1)) ++ ctx, t2))
       case App(t1, t2) => 
         val tpe1 = typeof(ctx, t1)
         val tpe2 = typeof(ctx, t2)
