@@ -109,7 +109,7 @@ object SimplyTyped extends StandardTokenParsers {
     case Second(Reduceable(tp)) => Second(tp)
     case TermPair(Reduceable(t1p), t2) => TermPair(t1p, t2)
     case TermPair(v1, Reduceable(t2p)) if isVal(v1) => TermPair(v1, t2p)
-    case t => throw new NoRuleApplies(t)
+    case _ => throw new NoRuleApplies(t)
   }
 
   object Reduceable {
@@ -177,7 +177,6 @@ object SimplyTyped extends StandardTokenParsers {
    *  @return    the computed type
    */
   def typeof(ctx: Context, t: Term): Type = {
-    implicit val ctx0 = ctx
     t match {
       case True() | False() => TypeBool
       case Zero() => TypeNat
@@ -203,7 +202,7 @@ object SimplyTyped extends StandardTokenParsers {
           if (tp1 == tp2) tp1 else throw new TypeError(t, "Type mismatch")
         case ot => throw new TypeError(t, s"TypeBool expected found $ot")
       }
-      case Var(x) => ctx0.find(_._1 == x).getOrElse(throw new TypeError(t, s"$x is an undefined variable"))._2
+      case Var(x) => ctx.find(_._1 == x).getOrElse(throw new TypeError(t, s"$x is an undefined variable"))._2
       case Abs(x, tpe1, t2) => TypeFun(tpe1, typeof(List((x, tpe1)) ++ ctx, t2))
       case App(t1, t2) => 
         val tpe1 = typeof(ctx, t1)
