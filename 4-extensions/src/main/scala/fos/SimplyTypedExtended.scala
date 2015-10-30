@@ -185,6 +185,9 @@ object SimplyTypedExtended extends  StandardTokenParsers {
       else Abs(y, tpe, subst(t1, x, s))
     case App(t1, t2) =>
       App(subst(t1, x, s), subst(t2, x, s))
+    case Case(t, x1, t1, x2, t2) => ??? // TODO: Implement this shit
+    case Inl(v, tp) => Inl(subst(v, x, s), tp)
+    case Inr(v, tp) => Inr(subst(v, x, s), tp)
     case _ => t
   }
 
