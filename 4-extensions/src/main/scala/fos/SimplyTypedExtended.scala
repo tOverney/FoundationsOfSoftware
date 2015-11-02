@@ -194,6 +194,8 @@ object SimplyTypedExtended extends  StandardTokenParsers {
   def isVal(t: Term): Boolean = t match {
     case True() | False() | Abs(_, _, _) => true
     case TermPair(v1, v2) => isVal(v1) && isVal(v2)
+    case Inl(t1) => isVal(t1)
+    case Inr(t1) => isVal(t1)
     case x => isNumVal(x)
   }
 
