@@ -218,10 +218,10 @@ object SimplyTypedExtended extends  StandardTokenParsers {
       else Abs(y, tpe, subst(t1, x, s))
     case App(t1, t2) =>
       App(subst(t1, x, s), subst(t2, x, s))
-    case Case(term, x1, t1, x2, t2) => {
-      Case(subst(term, x, s), x1, subst(t1, x, s), x2, subst(t2, x, s))
-    }
-    case Inr(v, tp) => Inr(subst(v, x, s), tp)
+    case c @ Case(term, x1, t1, x2, t2) if x1 != x && x2 != x =>
+      if ((FV(s) contains x1) || (FV(s) contains x2)) subst(alpha(c), x, s)
+      else Case(subst(term, x, s), x1, subst(t1, x, s), x2, subst(t2, x, s))
+        case Inr(v, tp) => Inr(subst(v, x, s), tp)
     case Inl(v, tp) => Inl(subst(v, x, s), tp)
     case Fix(t1) => Fix(subst(t1, x, s))
     case _ => t
@@ -245,10 +245,24 @@ object SimplyTypedExtended extends  StandardTokenParsers {
     case _ => Set.empty
   }
 
-  def alpha(t: Abs): Abs = {
-    val Abs(x, tpe, t1) = t
-    val y = System.identityHashCode().toString
-    Abs(y, tpe, subst(t1, x, Var(y)))
+  def alpha(t: Term) : Term = t match {
+    case Abs(x, tpe, t1) => {
+      val y = freshName
+      Abs(y, tpe, subst(t1, x, Var(y)))
+    }
+    case Case(term, x1, t1, x2, t2) => {
+      val nx1 = freshName
+      val nx2 = freshName
+
+      val nt1 = subst(t1, x1, Var(nx1))
+      val nt2 = subst(t2, x2, Var(nx2))
+
+      Case(term, nx1, nt1, nx2, nt2)
+    }
+  }
+
+  def freshName : String = {
+    System.identityHashCode().toString
   }
 
   /** Thrown when no reduction rule applies to the given term. */
