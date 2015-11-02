@@ -168,8 +168,8 @@ object SimplyTypedExtended extends  StandardTokenParsers {
     case TermPair(v1, Reduceable(t2p)) if isVal(v1) => TermPair(v1, t2p)
 
     // Case rules
-    case Case(Inl(v0, tpe), x1, t1, x2, t2) if isVal(v0) => subst(t1, x1, v0)
-    case Case(Inr(v0, tpe), x1, t1, x2, t2) if isVal(v0) => subst(t2, x2, v0)
+    case Case(Inl(v0, _), x1, t1, _, _) if isVal(v0) => subst(t1, x1, v0)
+    case Case(Inr(v0, _), _, _, x2, t2) if isVal(v0) => subst(t2, x2, v0)
     case Case(Reduceable(t), x1, t1, x2, t2) => Case(t, x1, t1, x2, t2)
 
     // Injection rules
@@ -177,7 +177,7 @@ object SimplyTypedExtended extends  StandardTokenParsers {
     case Inl(Reduceable(t), tpe) => Inl(t, tpe)
 
     // Fix rules
-    case Fix(a @ Abs(x, _, t2)) => subst(t2, x, Fix(a))
+    case Fix(a @ Abs(x, _, t2)) => subst(t2, x, t)
     case Fix(Reduceable(t)) => Fix(t)
 
     case _ => throw new NoRuleApplies(t)
