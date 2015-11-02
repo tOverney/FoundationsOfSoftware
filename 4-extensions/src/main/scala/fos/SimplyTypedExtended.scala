@@ -121,7 +121,7 @@ object SimplyTypedExtended extends  StandardTokenParsers {
           case ("+" ~ t) :: ls => TypeSum(procType(ls), t)
           case _ => tp
         }
-        procType(ts)
+        procType(ts.reverse)
       }
     }
   }
