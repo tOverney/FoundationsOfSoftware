@@ -63,6 +63,7 @@ object SimplyTypedExtended extends  StandardTokenParsers {
     | inr
     | cse
     | fix
+    | letrec
     | "(" ~> Term <~ ")"
   )
 
@@ -75,7 +76,8 @@ object SimplyTypedExtended extends  StandardTokenParsers {
   def iszero      = "iszero" ~> Term ^^ IsZero
   def variable    = ident ^^ Var
   def abstraction = "\\" ~> ident ~ (":" ~> Type <~ ".") ~ Term ^^ { case v ~  tp ~ t => Abs(v, tp, t) }
-  def let         =  "let" ~> ident ~ (":" ~> Type <~ "=") ~ Term ~ ("in" ~> Term) ^^ { case v ~ tp ~ t1 ~ t2 => App(Abs(v, tp, t2), t1) }
+  def let         = "let" ~> ident ~ (":" ~> Type <~ "=") ~ Term ~ ("in" ~> Term) ^^ { case v ~ tp ~ t1 ~ t2 => App(Abs(v, tp, t2), t1) }
+  def letrec      = "letrec" ~> ident ~ (":" ~> Type <~ "=") ~ Term ~ ("in" ~> Term) ^^ { case v ~ tp ~ t1 ~ t2 => App(Abs(v, tp, t2), Fix(Abs(v, tp, t1))) }
   def pair        = "{" ~> Term ~ ("," ~> Term <~ "}") ^^ { case t1 ~ t2 => TermPair(t1, t2) }
   def first       = "fst" ~> Term ^^ First
   def second      = "snd" ~> Term ^^ Second
@@ -131,10 +133,17 @@ object SimplyTypedExtended extends  StandardTokenParsers {
     *  @param t the given lambda abstraction.
     *  @return  the transformed term with bound variables renamed.
     */
-  def alpha(t: Abs): Abs = {
-    val Abs(x, tp, t1) = t
-    val y = freshName(x)
-    Abs(y, tp, subst(t1, x, Var(y)))
+  def alpha(t: Term): Term = t match {
+    case Abs(_x, tp, t1) =>
+      val x = freshName(_x)
+      Abs(x, tp, subst(t1, _x, Var(x)))
+
+    case Case(t, _x1, _t1, _x2, _t2) =>
+      val x1 = freshName(_x1)
+      val x2 = freshName(_x2)
+      val t1 = subst(_t1, _x1, Var(x1))
+      val t2 = subst(_t2, _x2, Var(x2))
+      Case(t, x1, t1, x2, t2)
   }
 
   private var count = 0
@@ -171,8 +180,13 @@ object SimplyTypedExtended extends  StandardTokenParsers {
     case Second(t)        => Second(subst(t, x, s))
     case Inl(t, tp)       => Inl(subst(t, x, s), tp)
     case Inr(t, tp)       => Inr(subst(t, x, s), tp)
-    case Case(t, x1, t1, x2, t2) => ???
-    case _                => t
+
+    case c @ Case(t, x1, t1, x2, t2) if x1 != x && x2 != x =>
+      if ((FV(s) contains x1) || (FV(s) contains x2)) subst(alpha(c), x, s)
+      else Case(subst(t, x, s), x1, subst(t1, x, s), x2, subst(t2, x, s))
+
+    case Fix(t) => Fix(subst(t, x, s))
+    case _      => t
   }
 
   def isV(t: Term): Boolean = t match {
@@ -203,6 +217,7 @@ object SimplyTypedExtended extends  StandardTokenParsers {
     case Inl(t, tp)              => FV(t)
     case Inr(t, tp)              => FV(t)
     case Case(t, x1, t1, x2, t2) => FV(t) ++ (FV(t1) - x1) ++ (FV(t2) - x2)
+    case Fix(t)                  => FV(t)
     case _                       => Set.empty
   }
 
@@ -224,8 +239,9 @@ object SimplyTypedExtended extends  StandardTokenParsers {
     case App(Abs(x, _, t), v)     if isV(v)             => subst(t, x, v)
     case First(TermPair(t1, t2))  if isV(t1) && isV(t2) => t1
     case Second(TermPair(t1, t2)) if isV(t1) && isV(t2) => t2
-    case Case(Inl(v), x1, t1, _, _) if isV(v)           => subst(t1, x1, v)
-    case Case(Inr(v), _, _, x2, t2) if isV(v)           => subst(t2, x2, v)
+    case Case(Inl(v, _), x1, t1, _, _) if isV(v)        => subst(t1, x1, v)
+    case Case(Inr(v, _), _, _, x2, t2) if isV(v)        => subst(t2, x2, v)
+    case Fix(Abs(x, tp, t2))                            => subst(t2, x, t)
 
     // Congruence Rules
     case If(Reduced(c), t1, t2)               => If(c, t1, t2)
@@ -241,6 +257,7 @@ object SimplyTypedExtended extends  StandardTokenParsers {
     case Inl(Reduced(t), tp)                  => Inl(t, tp)
     case Inr(Reduced(t), tp)                  => Inr(t, tp)
     case Case(Reduced(t), x1, t1, x2, t2)     => Case(t, x1, t1, x2, t2)
+    case Fix(Reduced(t))                      => Fix(t)
 
     case _ => throw new NoRuleApplies(t)
   }
@@ -345,8 +362,8 @@ object SimplyTypedExtended extends  StandardTokenParsers {
           throw new TypeError(t, s"pair type expected but $tp found")
       }
 
-    case Inl(t, tp) =>
-      val tp1 = typeof(ctx, t)
+    case Inl(t0, tp) =>
+      val tp1 = typeof(ctx, t0)
       tp match {
         case TypeSum(`tp1`, tp2) =>
           tp
@@ -354,8 +371,8 @@ object SimplyTypedExtended extends  StandardTokenParsers {
           throw new TypeError(t, s"???")
       }
 
-    case Inr(t, tp) =>
-      val tp2 = typeof(ctx, t)
+    case Inr(t0, tp) =>
+      val tp2 = typeof(ctx, t0)
       tp match {
         case TypeSum(tp1, `tp2`) =>
           tp
@@ -363,8 +380,8 @@ object SimplyTypedExtended extends  StandardTokenParsers {
           throw new TypeError(t, s"???")
       }
 
-    case Case(t, x1, t1, x2, t2) =>
-      typeof(ctx, t) match {
+    case Case(t0, x1, t1, x2, t2) =>
+      typeof(ctx, t0) match {
         case TypeSum(tp1, tp2) =>
           (typeof((x1, tp1) :: ctx, t1), typeof((x2, tp2) :: ctx, t2)) match {
             case (tp3, tp4) if tp3 == tp4 =>
@@ -376,6 +393,9 @@ object SimplyTypedExtended extends  StandardTokenParsers {
         case _ =>
           throw new TypeError(t, s"???")
       }
+
+    case Fix(t) =>
+      typeof(ctx, t)
   }
 
   def typeof(t: Term): Type = try {
