@@ -345,17 +345,20 @@ object SimplyTypedExtended extends  StandardTokenParsers {
 
         tpe match {
           case TypeSum(`tp1`, tp2) => tpe
-          case _ => throw new TypeError(t, s"???")
+          case _ => throw new TypeError(t, s"Expected TypeSum but got $tpe")
         }
       }
       case Inr(t2, tpe) => {
         val tp2 = typeof(ctx, t2)
         tpe match {
           case TypeSum(tp1, `tp2`) => tpe
-          case _ => throw new TypeError(t, s"???")
+          case _ => throw new TypeError(t, s"Expected TypeSum but got $tpe")
         }
       }
-      case Fix(t1) => typeof(ctx, t1)
+      case Fix(t1) => typeof(ctx, t1) match {
+        case TypeFun(tp1, tp2) if tp1 == tp2 => tp1
+        case tp @ _ => throw new TypeError(t, s"Expected TypeFun but got $tp")
+      }
       case _ => throw new TypeError(t, s"Unknown error $t")
     }
   }
