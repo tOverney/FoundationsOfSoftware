@@ -91,22 +91,18 @@ object SimplyTypedExtended extends  StandardTokenParsers {
   /** Type       ::= SimpleType [ "->" Type ]
    */
   def Type: Parser[Type] =
-    rep1sep(SimpleType, "->") ^^ {
-      case List(t) => t
-      case ts      => ts reduceRight TypeFun
+    SimpleType ~ opt("->" ~> Type) ^^ {
+      case tp1 ~ Some(tp2) => TypeFun(tp1, tp2)
+      case tp ~ None       => tp
     }
 
   /** SimpleType ::= BaseType [ ("*" SimpleType) | ("+" SimpleType) ]
    */
   def SimpleType: Parser[Type] =
-    BaseType ~ rep("*" ~ SimpleType | "+" ~ SimpleType) ^^ {
-      case t1 ~ ts =>
-        def inner(l: List[String ~ Type]): Type = l match {
-          case ("*" ~ t) :: ls => TypePair(t, inner(ls))
-          case ("+" ~ t) :: ls => TypeSum(t, inner(ls))
-          case _               => t1
-        }
-        inner(ts.reverse)
+    BaseType ~ opt("*" ~ SimpleType | "+" ~ SimpleType) ^^ {
+      case tp1 ~ Some("*" ~ tp2) => TypePair(tp1, tp2)
+      case tp1 ~ Some("+" ~ tp2) => TypeSum(tp1, tp2)
+      case tp ~ None             => tp
     }
 
   /** BaseType ::= "Bool" | "Nat" | "(" Type ")"
@@ -394,8 +390,13 @@ object SimplyTypedExtended extends  StandardTokenParsers {
           throw new TypeError(t, s"???")
       }
 
-    case Fix(t) =>
-      typeof(ctx, t)
+    case Fix(t0) =>
+      typeof(ctx, t0) match {
+        case TypeFun(tp1, tp2) if tp1 == tp2 =>
+          tp1
+        case _ =>
+          throw new TypeError(t, s"???")
+      }
   }
 
   def typeof(t: Term): Type = try {
@@ -424,6 +425,7 @@ object SimplyTypedExtended extends  StandardTokenParsers {
   def main(args: Array[String]): Unit = {
     val stdin = new java.io.BufferedReader(new java.io.InputStreamReader(System.in))
     val tokens = new lexical.Scanner(stdin.readLine())
+
     phrase(Term)(tokens) match {
       case Success(trees, _) =>
         try {
