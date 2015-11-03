@@ -96,8 +96,7 @@ object SimplyTypedExtended extends  StandardTokenParsers {
       inl |
       inr |
       cse |
-      fix |
-      letRec
+      fix
   )
 
   def numToSucc(nv: Int): Term = nv match {
@@ -150,6 +149,11 @@ object SimplyTypedExtended extends  StandardTokenParsers {
     case Pred(Zero()) => Zero()
     case Pred(Succ(t1)) if isNumVal(t1) => t1
     case App(Abs(x, _, t1), v2) if isVal(v2) => subst(t1, x, v2)
+    case First(p @ TermPair(v1, _)) if isVal(p) => v1
+    case Second(p @ TermPair(_, v2)) if isVal(p) => v2
+    case Case(Inl(v0, _), x1, t1, _, _) if isVal(v0) => subst(t1, x1, v0)
+    case Case(Inr(v0, _), _, _, x2, t2) if isVal(v0) => subst(t2, x2, v0)
+    case Fix(Abs(x, _, t2)) => subst(t2, x, t)
 
     // Congruence
     case If(Reduceable(t1p), t2, t3) => If(t1p, t2, t3)
@@ -158,26 +162,13 @@ object SimplyTypedExtended extends  StandardTokenParsers {
     case Pred(Reduceable(tp)) => Pred(tp)
     case App(Reduceable(t1p), t2) => App(t1p, t2)
     case App(v1, Reduceable(t2p)) if isVal(v1) => App(v1, t2p)
-
-    // Pair rules
-    case First(p @ TermPair(v1, _)) if isVal(p) => v1
-    case Second(p @ TermPair(_, v2)) if isVal(p) => v2
     case First(Reduceable(tp)) => First(tp)
     case Second(Reduceable(tp)) => Second(tp)
     case TermPair(Reduceable(t1p), t2) => TermPair(t1p, t2)
     case TermPair(v1, Reduceable(t2p)) if isVal(v1) => TermPair(v1, t2p)
-
-    // Case rules
-    case Case(Inl(v0, _), x1, t1, _, _) if isVal(v0) => subst(t1, x1, v0)
-    case Case(Inr(v0, _), _, _, x2, t2) if isVal(v0) => subst(t2, x2, v0)
-    case Case(Reduceable(t), x1, t1, x2, t2) => Case(t, x1, t1, x2, t2)
-
-    // Injection rules
     case Inr(Reduceable(t), tpe) => Inr(t, tpe)
     case Inl(Reduceable(t), tpe) => Inl(t, tpe)
-
-    // Fix rules
-    case Fix(a @ Abs(x, _, t2)) => subst(t2, x, t)
+    case Case(Reduceable(t), x1, t1, x2, t2) => Case(t, x1, t1, x2, t2)
     case Fix(Reduceable(t)) => Fix(t)
 
     case _ => throw new NoRuleApplies(t)
@@ -194,8 +185,8 @@ object SimplyTypedExtended extends  StandardTokenParsers {
   def isVal(t: Term): Boolean = t match {
     case True() | False() | Abs(_, _, _) => true
     case TermPair(v1, v2) => isVal(v1) && isVal(v2)
-    case Inl(t1) => isVal(t1)
-    case Inr(t1) => isVal(t1)
+    case Inl(t1, _) => isVal(t1)
+    case Inr(t1, _) => isVal(t1)
     case x => isNumVal(x)
   }
 
@@ -215,56 +206,13 @@ object SimplyTypedExtended extends  StandardTokenParsers {
     case If(cond, t1, t2) =>
       If(subst(cond, x, s), subst(t1, x, s), subst(t2, x, s))
         case Var(`x`) => s
-    case abs @ Abs(y, tpe, t1) if y != x =>
-      if (FV(s)(y)) subst(alpha(abs), x, s)
-      else Abs(y, tpe, subst(t1, x, s))
-    case App(t1, t2) =>
-      App(subst(t1, x, s), subst(t2, x, s))
-    case c @ Case(term, x1, t1, x2, t2) if x1 != x && x2 != x =>
-      if ((FV(s) contains x1) || (FV(s) contains x2)) subst(alpha(c), x, s)
-      else Case(subst(term, x, s), x1, subst(t1, x, s), x2, subst(t2, x, s))
-        case Inr(v, tp) => Inr(subst(v, x, s), tp)
+    case Abs(y, tpe, t1) if y != x => Abs(y, tpe, subst(t1, x, s))
+    case App(t1, t2) => App(subst(t1, x, s), subst(t2, x, s))
+    case c @ Case(term, x1, t1, x2, t2) if x1 != x && x2 != x => Case(subst(term, x, s), x1, subst(t1, x, s), x2, subst(t2, x, s))
+    case Inr(v, tp) => Inr(subst(v, x, s), tp)
     case Inl(v, tp) => Inl(subst(v, x, s), tp)
     case Fix(t1) => Fix(subst(t1, x, s))
     case _ => t
-  }
-
-  def FV(t: Term): Set[String] = t match {
-    case Var(name)   => Set(name)
-    case Succ(t1) => FV(t1)
-    case Pred(t1) => FV(t1)
-    case IsZero(t1) => FV(t1)
-    case If(cond, t1, t2) => FV(cond) ++ FV(t1) ++ FV(t2)
-    case Abs(v, _, t1)   => FV(t1) - v
-    case App(t1, t2) => FV(t1) ++ FV(t2)
-    case TermPair(t1, t2) => FV(t1) ++ FV(t2)
-    case First(t1) => FV(t1)
-    case Second(t1) => FV(t1)
-    case Case(t, x1, t1, x2, t2) => FV(t1) ++ FV(t1) - x1 ++ FV(t2) - x2
-    case Inr(t1, _) => FV(t1)
-    case Inl(t1, _) => FV(t1)
-    case Fix(t1) => FV(t1)
-    case _ => Set.empty
-  }
-
-  def alpha(t: Term) : Term = t match {
-    case Abs(x, tpe, t1) => {
-      val y = freshName
-      Abs(y, tpe, subst(t1, x, Var(y)))
-    }
-    case Case(term, x1, t1, x2, t2) => {
-      val nx1 = freshName
-      val nx2 = freshName
-
-      val nt1 = subst(t1, x1, Var(nx1))
-      val nt2 = subst(t2, x2, Var(nx2))
-
-      Case(term, nx1, nt1, nx2, nt2)
-    }
-  }
-
-  def freshName : String = {
-    System.identityHashCode().toString
   }
 
   /** Thrown when no reduction rule applies to the given term. */
@@ -337,7 +285,7 @@ object SimplyTypedExtended extends  StandardTokenParsers {
           case TypeSum(tp1, tp2) =>
             (typeof((x1, tp1) :: ctx, t1), typeof((x2, tp2) :: ctx, t2)) match {
               case (tp3, tp4) if tp3 == tp4 => tp3
-              case _ => throw new TypeError(t, s"Type mismatch in case branch")
+              case (tp3, tp4) => throw new TypeError(t, s"Type mismatch in case branch $tp3 and $tp4")
             }
           case tp @ _ => throw new TypeError(t, s"Expected TypeSum but got $tp")
         }
