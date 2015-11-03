@@ -278,7 +278,7 @@ object SimplyTypedExtended extends  StandardTokenParsers {
         case TypeFun(`tp2`, tp) =>
           tp
         case _ =>
-          throw new TypeError(t, s"parameter type mismatch: expected $tp2, found $tp1")
+          throw new TypeError(t, s"type mismatch: expected $tp2 -> T, found $tp1")
       }
 
     case TermPair(t1, t2) =>
@@ -308,7 +308,7 @@ object SimplyTypedExtended extends  StandardTokenParsers {
         case TypeSum(`tp1`, tp2) =>
           tp
         case _ =>
-          throw new TypeError(t, s"???")
+          throw new TypeError(t, s"($tp1, T) expected but $tp found")
       }
 
     case Inr(t0, tp) =>
@@ -317,38 +317,28 @@ object SimplyTypedExtended extends  StandardTokenParsers {
         case TypeSum(tp1, `tp2`) =>
           tp
         case _ =>
-          throw new TypeError(t, s"???")
+          throw new TypeError(t, s"(T, $tp2) expected but $tp found")
       }
 
     case Case(t0, x1, t1, x2, t2) =>
       typeof(ctx, t0) match {
         case TypeSum(tp1, tp2) =>
-          (typeof((x1, tp1) :: ctx, t1), typeof((x2, tp2) :: ctx, t2)) match {
-            case (tp3, tp4) if tp3 == tp4 =>
-              tp3
-            case (tp3, tp4) =>
-              throw new TypeError(t, s"???")
-          }
+          val tp3 = typeof((x1, tp1) :: ctx, t1)
+          val tp4 = typeof((x2, tp2) :: ctx, t2)
+          if (tp3 == tp4) tp3
+          else throw new TypeError(t, s"type mismatch expected: $tp3 found $tp4")
 
-        case _ =>
-          throw new TypeError(t, s"???")
+        case tp =>
+          throw new TypeError(t, s"sum type expected but $tp found")
       }
 
     case Fix(t0) =>
       typeof(ctx, t0) match {
         case TypeFun(tp1, tp2) if tp1 == tp2 =>
           tp1
-        case _ =>
-          throw new TypeError(t, s"???")
+        case tp =>
+          throw new TypeError(t, s"identity function type expected but $tp found")
       }
-  }
-
-  def typeof(t: Term): Type = try {
-    typeof(Nil, t)
-  } catch {
-    case err @ TypeError(_, _) =>
-      Console.println(err)
-      null
   }
 
   /** Returns a stream of terms, each being one step of reduction.
