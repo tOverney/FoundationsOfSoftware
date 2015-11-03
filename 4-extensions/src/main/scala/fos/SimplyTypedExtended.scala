@@ -1,7 +1,5 @@
 package fos
 
-import javax.management.openmbean.SimpleType
-
 import scala.util.parsing.combinator.syntactical.StandardTokenParsers
 import scala.util.parsing.input._
 
@@ -117,39 +115,6 @@ object SimplyTypedExtended extends  StandardTokenParsers {
     if (x == 0) Zero()
     else Succ(desugarNumLit(x - 1))
 
-  /** <p>
-    *    Alpha conversion: term <code>t</code> should be a lambda abstraction
-    *    <code>\x. t</code>.
-    *  </p>
-    *  <p>
-    *    All free occurences of <code>x</code> inside term <code>t/code>
-    *    will be renamed to a unique name.
-    *  </p>
-    *
-    *  @param t the given lambda abstraction.
-    *  @return  the transformed term with bound variables renamed.
-    */
-  def alpha(t: Term): Term = t match {
-    case Abs(_x, tp, t1) =>
-      val x = freshName(_x)
-      Abs(x, tp, subst(t1, _x, Var(x)))
-
-    case Case(t, _x1, _t1, _x2, _t2) =>
-      val x1 = freshName(_x1)
-      val x2 = freshName(_x2)
-      val t1 = subst(_t1, _x1, Var(x1))
-      val t2 = subst(_t2, _x2, Var(x2))
-      Case(t, x1, t1, x2, t2)
-  }
-
-  private var count = 0
-
-  def freshName(prefix: String): String = {
-    val fresh = s"$prefix$count"
-    count += 1
-    fresh
-  }
-
   /** Straight forward substitution method
     *  (see definition 5.3.5 in TAPL book).
     *  [x -> s]t
@@ -160,26 +125,23 @@ object SimplyTypedExtended extends  StandardTokenParsers {
     *  @return  ...
     */
   def subst(t: Term, x: String, s: Term): Term = t match {
-    case Succ(t)          => Succ(subst(t, x, s))
-    case Pred(t)          => Pred(subst(t, x, s))
-    case IsZero(t)        => IsZero(subst(t, x, s))
-    case If(cond, t1, t2) => If(subst(cond, x, s), subst(t1, x, s), subst(t2, x, s))
-    case Var(`x`)         => s
+    case Succ(t)                  => Succ(subst(t, x, s))
+    case Pred(t)                  => Pred(subst(t, x, s))
+    case IsZero(t)                => IsZero(subst(t, x, s))
+    case If(cond, t1, t2)         => If(subst(cond, x, s), subst(t1, x, s), subst(t2, x, s))
+    case Var(`x`)                 => s
+    case Abs(y, tp, t1) if y != x => Abs(y, tp, subst(t1, x, s))
+    case App(t1, t2)              => App(subst(t1, x, s), subst(t2, x, s))
+    case TermPair(t1, t2)         => TermPair(subst(t1, x, s), subst(t2, x, s))
+    case First(t)                 => First(subst(t, x, s))
+    case Second(t)                => Second(subst(t, x, s))
+    case Inl(t, tp)               => Inl(subst(t, x, s), tp)
+    case Inr(t, tp)               => Inr(subst(t, x, s), tp)
 
-    case a @ Abs(y, tp, t1) if y != x =>
-      if (FV(s) contains y) subst(alpha(a), x, s)
-      else Abs(y, tp, subst(t1, x, s))
-
-    case App(t1, t2)      => App(subst(t1, x, s), subst(t2, x, s))
-    case TermPair(t1, t2) => TermPair(subst(t1, x, s), subst(t2, x, s))
-    case First(t)         => First(subst(t, x, s))
-    case Second(t)        => Second(subst(t, x, s))
-    case Inl(t, tp)       => Inl(subst(t, x, s), tp)
-    case Inr(t, tp)       => Inr(subst(t, x, s), tp)
-
-    case c @ Case(t, x1, t1, x2, t2) if x1 != x && x2 != x =>
-      if ((FV(s) contains x1) || (FV(s) contains x2)) subst(alpha(c), x, s)
-      else Case(subst(t, x, s), x1, subst(t1, x, s), x2, subst(t2, x, s))
+    case Case(t, x1, t1, x2, t2) =>
+      val st1 = if (x1 != x) subst(t1, x, s) else t1
+      val st2 = if (x2 != x) subst(t2, x, s) else t2
+      Case(subst(t, x, s), x1, st1, x2, st2)
 
     case Fix(t) => Fix(subst(t, x, s))
     case _      => t
@@ -197,24 +159,6 @@ object SimplyTypedExtended extends  StandardTokenParsers {
     case Zero()   => true
     case Succ(nv) => isNV(nv)
     case _        => false
-  }
-
-  def FV(t: Term): Set[String] = t match {
-    case Succ(t)                 => FV(t)
-    case Pred(t)                 => FV(t)
-    case IsZero(t)               => FV(t)
-    case If(cond, t1, t2)        => FV(cond) ++ FV(t1) ++ FV(t2)
-    case Var(name)               => Set(name)
-    case Abs(v, _, t)            => FV(t) - v
-    case App(t1, t2)             => FV(t1) ++ FV(t2)
-    case TermPair(t1, t2)        => FV(t1) ++ FV(t2)
-    case First(t)                => FV(t)
-    case Second(t)               => FV(t)
-    case Inl(t, tp)              => FV(t)
-    case Inr(t, tp)              => FV(t)
-    case Case(t, x1, t1, x2, t2) => FV(t) ++ (FV(t1) - x1) ++ (FV(t2) - x2)
-    case Fix(t)                  => FV(t)
-    case _                       => Set.empty
   }
 
   object Reduced {
