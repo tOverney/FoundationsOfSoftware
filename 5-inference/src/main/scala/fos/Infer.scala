@@ -1,9 +1,17 @@
 package fos
 
-import scala.util.Try
-
 object Infer {
-  case class TypeScheme(params: List[TypeVar], tp: Type)
+
+  case class TypeScheme(params: List[TypeVar], tp: Type) {
+    def instantiate: Type = {
+      val subst = (params foldLeft Substitution.empty) {
+        case (acc, tv @ TypeVar(name)) =>
+          acc + (tv -> freshType(name))
+      }
+      subst(tp)
+    }
+  }
+
   type Env = List[(String, TypeScheme)]
   type Constraint = (Type, Type)
 
@@ -11,10 +19,10 @@ object Infer {
 
   def collect(env: Env, t: Term): (Type, List[Constraint]) = t match {
     case True() | False() =>
-      (BoolType, List())
+      (BoolType, Nil)
 
     case Zero() =>
-      (NatType, List())
+      (NatType, Nil)
 
     case Pred(t1) =>
       val (tp, c) = collect(env, t1)
@@ -35,20 +43,16 @@ object Infer {
       (tp2, (tp1, BoolType) :: (tp2, tp3) :: c1 ::: c2 ::: c3)
 
     case Var(name) =>
-      val TypeScheme(params, tp) = env find (_._1 == name) map (_._2) getOrElse {
+      val ts = env find (_._1 == name) map (_._2) getOrElse {
         throw new TypeError(s"free variable $name")
       }
-
-      val subst = (params foldLeft Substitution.empty) {
-        case (subst, tv @ TypeVar(name)) =>
-          subst + (tv -> freshType(name))
-      }
-
-      (subst(tp), List())
+      (ts.instantiate, Nil)
 
     case Abs(x, tpTree, t1) =>
-      val tp1 = Try(tpTree.tpe) getOrElse freshType()
-      val (tp2, c) = collect((x, TypeScheme(List(), tp1)) :: env, t1)
+      val tp1 =
+        if (tpTree.isInstanceOf[EmptyTypeTree]) freshType()
+        else tpTree.tpe
+      val (tp2, c) = collect((x, TypeScheme(Nil, tp1)) :: env, t1)
       (FunType(tp1, tp2), c)
 
     case App(t1, t2) =>
@@ -65,11 +69,10 @@ object Infer {
         case (name, TypeScheme(ps, tp)) =>
           (name, TypeScheme(ps, sub(tp)))
       }
-      val vars = tp1.vars --
+      val params = tp1.vars --
         (env2 map (_._2.tp.vars) fold Set.empty)(_ ++ _)
 
-      val params = vars.toList map (v => freshType(v.name))
-      collect((x, TypeScheme(params, tp1)) :: env2, t2)
+      collect((x, TypeScheme(params.toList, tp1)) :: env2, t2)
 
     case Let(x, tpTree, t1, t2) =>
       collect(env, App(Abs(x, tpTree, t2), t1))
