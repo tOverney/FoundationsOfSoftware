@@ -35,10 +35,16 @@ object Infer {
       (tp2, (tp1, BoolType) :: (tp2, tp3) :: c1 ::: c2 ::: c3)
 
     case Var(name) =>
-      val tp = env find (_._1 == name) map (_._2.tp) getOrElse {
+      val TypeScheme(params, tp) = env find (_._1 == name) map (_._2) getOrElse {
         throw new TypeError(s"free variable $name")
       }
-      (tp, List())
+
+      val subst = (params foldLeft Substitution.empty) {
+        case (subst, tv @ TypeVar(name)) =>
+          subst + (tv -> freshType(name))
+      }
+
+      (subst(tp), List())
 
     case Abs(x, tpTree, t1) =>
       val tp1 = Try(tpTree.tpe) getOrElse freshType()
@@ -50,6 +56,23 @@ object Infer {
       val (tp2, c2) = collect(env, t2)
       val tp = freshType()
       (tp, (tp1, FunType(tp2, tp)) :: c1 ::: c2)
+
+    case Let(x, EmptyTypeTree(), t1, t2) =>
+      val (s1, c1) = collect(env, t1)
+      val sub = unify(c1)
+      val tp1 = sub(s1)
+      val env2 = env map {
+        case (name, TypeScheme(ps, tp)) =>
+          (name, TypeScheme(ps, sub(tp)))
+      }
+      val vars = tp1.vars --
+        (env2 map (_._2.tp.vars) fold Set.empty)(_ ++ _)
+
+      val params = vars.toList map (v => freshType(v.name))
+      collect((x, TypeScheme(params, tp1)) :: env2, t2)
+
+    case Let(x, tpTree, t1, t2) =>
+      collect(env, App(Abs(x, tpTree, t2), t1))
   }
 
   def unify(cs: List[Constraint]): Type => Type =
@@ -89,8 +112,8 @@ object Infer {
 
   private var count = 0
 
-  private def freshType() = {
-    val tpe = TypeVar(s"T$count")
+  private def freshType(prefix: String = "T") = {
+    val tpe = TypeVar(s"$prefix$count")
     count += 1
     tpe
   }
@@ -110,6 +133,8 @@ object Infer {
 
     def +(pair: (Type, Type)): Substitution =
       new Substitution(subst + pair)
+
+    override def toString = subst.toString
   }
 
   object Substitution {
@@ -124,6 +149,12 @@ object Infer {
       case `thatTpe`       => true
       case FunType(t1, t2) => (t1 contains thatTpe) || (t2 contains thatTpe)
       case _               => false
+    }
+
+    def vars: Set[TypeVar] = tpe match {
+      case tpVar: TypeVar  => Set(tpVar)
+      case FunType(t1, t2) => t1.vars ++ t2.vars
+      case _               => Set.empty
     }
   }
 }
