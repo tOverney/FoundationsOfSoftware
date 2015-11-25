@@ -6,7 +6,7 @@ object Infer {
     def instantiate: Type = {
       val subst = (params foldLeft Substitution.empty) {
         case (acc, tv @ TypeVar(name)) =>
-          acc + (tv -> freshType(name))
+          acc + (tv -> freshType())
       }
       subst(tp)
     }
@@ -72,7 +72,8 @@ object Infer {
       val params = tp1.vars --
         (env2 map (_._2.tp.vars) fold Set.empty)(_ ++ _)
 
-      collect((x, TypeScheme(params.toList, tp1)) :: env2, t2)
+      val (tp2, c2) = collect((x, TypeScheme(params.toList, tp1)) :: env2, t2)
+      (tp2, c1 ::: c2)
 
     case Let(x, tpTree, t1, t2) =>
       collect(env, App(Abs(x, tpTree, t2), t1))
